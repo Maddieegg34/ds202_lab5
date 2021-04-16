@@ -1,0 +1,209 @@
+---
+title: "Team.Rmd"
+author: "Emily Pollock"
+date: "4/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(maps)
+library(lubridate)
+library(ggplot2)
+```
+
+```{r}
+acc <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/accident.csv", stringsAsFactors = FALSE)
+
+per <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/person.csv", stringsAsFactors = FALSE)
+```
+
+
+#1: Are there some days of the week where more accidents happen than the others (see FARS manual, use variable DAY_WEEK)?
+```{r}
+ggplot(acc, aes(x = DAY_WEEK)) + geom_bar(fill = "maroon") + scale_x_discrete(limit = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")) + ggtitle("Number of Fatal Accidents Per Day of the Week") + xlab("Day of the Week") + ylab("Count")
+
+```
+
+#From looking at the graph, it is apparent that the end of the week sees more accidents. Satuday has the most fatal accidents, with a count close to 6,000. During the middle of the week, accidents stay pretty consistent around 4,000, but as the weekend nears, they go up steadily, as shown by the increasing numbers for Thursday and Friday. This pattern makes sense because most of these accidents could be tied to drunk driving, and the weekend is when most people will have parties or go out to bars to drink.
+
+
+#2: Create a data frame containing the persons who are fatally hurt in the accidents (look up variable INJ_SEV)
+
+```{r}
+Fatal <- per %>%
+  filter(INJ_SEV == 4) %>%
+  select(INJ_SEV)
+head(Fatal)
+```
+
+#3: Create a data frame containing the most dangerous vehicle make in each state. The number of persons fatally hit in the vehicle make is used to assess the (non-)safety of a make. Make sure to handle the missing values appropriately. (look up variable MAKE)
+
+```{r}
+fatalStMa <- per %>%
+  group_by(STATE, MAKE) %>%
+  summarize(nFatal = n())
+head(fatalStMa)
+```
+
+```{r}
+MostDangerous <- fatalStMa %>%
+  group_by(STATE) %>%
+  filter(nFatal == max(nFatal))
+head(MostDangerous)
+```
+```{r}
+MostDangerous1 <- na.omit(MostDangerous)
+head(MostDangerous1)
+```
+
+#4: Create a map, and label each state with the most dangerous vehicle. Discuss the definition of the most dangerous vehicle, and what you find from the map. (Hint: Read the description for the STATE and COUNTY columns in the FARS manual. The state & county codes are Geographic Locator Codes (GLCs) from the General Services Administration’s (GSA) publication. Use readxl::read_xlsx to read in the GLCs.)
+
+```{r}
+StateCounty <- readxl::read_xlsx('FRPP_GLC_-_United_StATESaPRIL62021.xlsx')
+StateCounty
+str(StateCounty)
+```
+
+```{r}
+states = map_data("state")
+str(states)
+```
+
+
+```{r}
+justStates <- StateCounty %>%
+  distinct(`State Code`, `State Name`)
+str(justStates)
+
+MostDangerous2 <- MostDangerous1 %>%
+  mutate(STATE = as.character(STATE)) %>%
+  inner_join(justStates, by = c('STATE' = "State Code"))
+head(MostDangerous2)
+```
+
+```{r}
+states1 <- states %>%
+  select(long, lat, region)
+head(states1)
+```
+```{r}
+MostDangerous3 <- MostDangerous2 %>%
+  select(`State Name`, MAKE)
+head(MostDangerous3)
+```
+
+
+```{r}
+states1$region <- toupper(states1$region)
+
+StateLonLat <- MostDangerous3 %>%
+  group_by(`State Name`, MAKE) %>%
+  right_join(states1, by = c('State Name' = "region")) %>%
+  summarize(long = mean(long),
+            lat = mean(lat)) %>%
+  na.omit(MAKE)
+head(StateLonLat)
+```
+
+```{r}
+StateLonLat1 <- StateLonLat %>%
+  ungroup() %>%
+  select(MAKE, long, lat)
+head(StateLonLat1)
+```
+
+```{r}
+ggplot(states, aes(x=long, y=lat)) + geom_path(aes(group=group))
+ggplot(states, aes(x=long, y=lat)) + geom_polygon(aes(group=group))
+```
+
+```{r}
+ggplot(states, aes(x = long, y = lat)) + geom_path(aes(group=group)) + geom_text(aes(label = MAKE), color = 'red', data = StateLonLat1)
+ggplot(states, aes(x = long, y = lat)) + geom_polygon(aes(group=group)) + geom_text(aes(label = MAKE), color = 'red', data = StateLonLat1)
+```
+
+#The most dangerous vehicle can be defined as the car make that is associated with the most fatal injuries. From looking at the map, the make number that stands out the most would be 20. There are a few more make numbers such as 37 and 12 that appear quite often as well.
+
+
+#5: Join the accident and person table (work out which variable(s) to use) 
+```{r}
+joinedtables <- left_join(acc, per)
+head(joinedtables)
+```
+
+#6: Tally the number of accidents by day of the week (DAY_WEEK), hour of the day (HOUR) and gender (SEX). Visualize the results and explain what you find.
+```{r}
+joinedtables$HOUR <- as.integer(joinedtables$HOUR)
+joinedtables2 <- joinedtables %>%
+  filter(HOUR != "99" & SEX <=3) %>%
+  mutate(Sex = if_else(SEX == 1, 'Male', 'Female')) %>%
+  group_by(HOUR, DAY_WEEK, Sex) %>%
+  summarize(ACCIDENTS = n()) %>%
+  mutate(SEX = as.factor(Sex))
+
+joinedtables2$Weekday <- wday(joinedtables2$DAY_WEEK, label = T)
+
+ggplot(joinedtables2, aes(x = HOUR, y = ACCIDENTS, color = SEX)) + geom_line() + facet_wrap(~DAY_WEEK)
+```
+
+#From the graphs we can observe that males get into more accidents than females overall. However, both males and females follow a similar pattern of rises and declines in accidents throughout each week day. Males and females tend to get into the most accidents around midnight on Sunday (day 1) and the late afternoon-evening on every day of the week. Friday (day 6) and Saturday (day 7) see the highest peaks in accidents among the other days, and this peak is in the late evening. Saturday, as well as Sunday, also see high accident peaks just after midnight. The fact that Friday, Saturday and Sunday show the highest peaks in accidents makes sense because people are more likely to go out to drink on these days and drunk drive afterward.
+
+#7: Now plot a choropleth map of the number of deaths on a county level. Also explain what you find.
+```{r}
+counties = map_data('county')
+head(counties)
+```
+```{r}
+StateCounty$'State Code' <- as.numeric(StateCounty$'State Code')
+StateCounty$'City Code' <- as.numeric(StateCounty$'City Code')
+StateCounty$'County Code' <- as.numeric(StateCounty$'County Code')
+
+StatesandCounties <- StateCounty %>%
+  distinct(`State Code`, `State Name`, `County Code`, `County Name`)
+str(StatesandCounties)
+
+fatalStCount <- per %>%
+  group_by(STATE, COUNTY) %>%
+  summarize(nFatal = n())
+head(fatalStCount)
+
+fatalStCount2 <- fatalStCount %>%
+  group_by(nFatal) %>%
+  inner_join(StatesandCounties, by = c('STATE' = "State Code", 'COUNTY' = "County Code"))
+head(fatalStCount2)
+```
+
+```{r}
+counties$region <- toupper(counties$region)
+counties$subregion <- toupper(counties$subregion)
+
+fatalStCount3 <- fatalStCount2 %>%
+  right_join(counties, by = c('State Name' = "region", 'County Name' = "subregion"))
+head(fatalStCount3)
+```
+```{r}
+fatalStCount3 %>% ggplot(aes(x = long, y = lat)) + geom_polygon(aes(group = group, fill = nFatal))
+```
+
+#Based off the choropleth map above, we can definitely see a few patterns in terms of county locations and the number of fatal accidents. It looks like the areas with the highest count of accidents are in the south, primarily counties in the southwest regions of California and Arizona, the southern midwest in the Texas area, and the southeastern area around Florida. These areas had counts of fatalities between 1200 and 1600, whereas several locations in the midwest and northern regions had counts between 400 and 800. The gray areas on the map depict regions where there were no accidents reported at all; these are mainly centered in the midwest, and are sparsely scattered in both the east and west sides of the United States.
+
+#8:Is summer or winter more dangerous? Does this depend on states? Explore and explain.
+
+```{r}
+joinedtables$MONTH <- as.integer(joinedtables$MONTH)
+joinedtables3 <- joinedtables %>%
+  filter(MONTH != c(3, 4, 5, 9, 10) & INJ_SEV >=4) %>%
+  mutate(MONTH = ifelse(MONTH == c(6, 7, 8), 'Summer', 'Winter')) %>%
+  group_by(MONTH, INJ_SEV) %>%
+  summarize(ACCIDENTS = n()) %>%
+  mutate(MONTH = as.factor(MONTH))
+
+ggplot(joinedtables3, aes(x = INJ_SEV, y = ACCIDENTS, color = MONTH)) + geom_line() + facet_wrap(~MONTH)
+```
+
+#The time series plot above does a great job of showing the severity of car accidents in the summer months of June, July, and August, as well as the winter months of November, December, January, and February. It looks like winter is more dangerous in terms of the amount of accidents that are charecterized as being "fatal", with INJ_SEV values between 4 and 9. Seeing as the winter months have a larger amount of fatal accidents, we could infer that states expierencing more fatalities would be areas with harsher winter weather conditions such as northern states like Minnesota, North/South Dakota, Wisconsin, Montana, etc.
